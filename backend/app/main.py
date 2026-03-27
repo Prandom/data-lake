@@ -1,28 +1,35 @@
-import os
 import json
+import os
+import re
 from contextlib import asynccontextmanager
-from typing import Optional
 from datetime import datetime
+from typing import Any, Dict, List
 
-from fastapi import FastAPI, WebSocket, HTTPException, Query
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, List
-import uvicorn
+from sqlalchemy.orm import Session
+
+from app.db.models import FileMetadata
+from app.db.session import get_db, init_db
+from app.jobs.sync import get_sync_stats, run_sync
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Starting Personal Data Lake Agent (Week 1)...")
-    print("🔗 Docs: http://localhost:8000/docs")
-    print("🔗 ReDoc: http://localhost:8000/redoc")
+    if os.getenv("DATA_LAKE_TESTING") != "1":
+        init_db()
+    print("Starting Personal Data Lake Agent (Week 2)...")
+    print("Docs: http://localhost:8000/docs")
     yield
-    print("🛑 Shutting down...")
+    print("Shutting down...")
 
 
 app = FastAPI(
     title="Personal Data Lake Agent",
-    description="Week 1: FastAPI + FileSystem MCP test harness",
+    description="Week 2: FastAPI + FileSystem MCP + DB + Sync job",
     version="0.1.0",
     lifespan=lifespan,
     redoc_url=None,  # Disable ReDoc to avoid CDN MIME type issues
@@ -233,6 +240,101 @@ async def test_read_file(path: str = Query(...)) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# =============================================================================
+# WEEK 2: SYNC ENDPOINTS
+# =============================================================================
+
+
+def _get_allowed_paths_from_env() -> List[str]:
+    raw = os.getenv("DATA_LAKE_ALLOWED_PATHS", "").strip()
+    if not raw:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "DATA_LAKE_ALLOWED_PATHS is required (comma/semicolon-separated "
+                "list of allowed root paths)"
+            ),
+        )
+
+    paths = [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
+    if not paths:
+        raise HTTPException(
+            status_code=400,
+            detail="DATA_LAKE_ALLOWED_PATHS did not contain any usable paths",
+        )
+
+    return paths
+
+
+@app.get("/api/sync/status")
+async def sync_status(db: Session = Depends(get_db)):
+    """
+    Get sync status and summary stats.
+    
+    Example:
+      GET /api/sync/status
+    """
+    stats = get_sync_stats(db)
+    return stats
+
+
+@app.post("/api/sync/trigger")
+async def trigger_sync(db: Session = Depends(get_db)):
+    """
+    Trigger a manual filesystem sync.
+    
+    Returns sync run ID and stats.
+    """
+    allowed_paths = _get_allowed_paths_from_env()
+    try:
+        return run_sync(db, allowed_paths=allowed_paths)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/files")
+async def list_files(
+    limit: int = 50,
+    offset: int = 0,
+    needs_sync: bool | None = None,
+    db: Session = Depends(get_db),
+):
+    """
+    List indexed files with sync state.
+    
+    Query params:
+    - limit: max files to return
+    - offset: pagination
+    - needs_sync: filter by sync state
+    """
+    query = db.query(FileMetadata)
+    
+    if needs_sync is not None:
+        query = query.filter(FileMetadata.needs_sync.is_(needs_sync))
+    
+    total = query.count()
+    files = (
+        query.order_by(FileMetadata.modified.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    
+    return {
+        "files": [
+            {
+                "path": f.path,
+                "size": f.size,
+                "modified": f.modified.isoformat(),
+                "last_synced": f.last_synced.isoformat() if f.last_synced else None,
+                "needs_sync": f.needs_sync,
+            }
+            for f in files
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 # =============================================================================
 # ROOT + ERROR HANDLER
@@ -243,7 +345,7 @@ async def test_read_file(path: str = Query(...)) -> Dict[str, Any]:
 async def root() -> Dict[str, Any]:
     """Welcome & docs hint."""
     return {
-        "message": "Personal Data Lake Agent - Week 1 backend is running",
+        "message": "Personal Data Lake Agent backend is running",
         "status": "ok",
         "endpoints": {
             "health": "/health",
@@ -252,8 +354,10 @@ async def root() -> Dict[str, Any]:
             "websocket": "ws://localhost:8000/ws/query",
             "fs_list": "/api/test/filesystem/list?path=.",
             "fs_read": "/api/test/filesystem/read?path=./some_file.txt",
+            "sync_status": "/api/sync/status",
+            "sync_trigger": "POST /api/sync/trigger",
+            "files": "/api/files",
             "docs": "/docs",
-            "redoc": "/redoc",
         },
     }
 
@@ -266,6 +370,19 @@ async def http_exception_handler(request, exc: HTTPException):
             "error": exc.detail,
             "status_code": exc.status_code,
             "timestamp": datetime.now().isoformat(),
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Validation error",
+            "status_code": 422,
+            "timestamp": datetime.now().isoformat(),
+            "details": exc.errors(),
         },
     )
 

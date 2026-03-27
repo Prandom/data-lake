@@ -9,6 +9,21 @@ __pycache__/
 .vscode/
 # Environment variables
 .env
+
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Database files (generated, not versioned)
+*.db
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# Local scratch / temp
+.tmp/
+backend/.tmp/
