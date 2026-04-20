@@ -1,12 +1,13 @@
 """
-Week 2: SQLAlchemy models for file metadata and sync state.
+SQLAlchemy models for file metadata, sync state, and vector search.
 
 Tables:
 - FileMetadata: tracks individual files (path, size, modified, last_synced)
 - SyncRun: tracks sync operations (when, how many files changed)
+- ChunkMetadata: stores text chunks alongside FAISS vector IDs (Week 3)
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, func
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, func
 from sqlalchemy.orm import declarative_base
 
 
@@ -84,3 +85,29 @@ class SyncRun(Base):
     
     def __repr__(self):
         return f"<SyncRun(id={self.id}, started={self.started_at}, status={self.status})>"
+
+
+class ChunkMetadata(Base):
+    """
+    Stores chunk text + metadata alongside FAISS vector IDs.
+
+    FAISS only stores vectors and returns integer IDs.
+    This table maps those IDs back to actual content.
+
+    The `faiss_id` column corresponds to the row position in the FAISS index.
+    """
+
+    __tablename__ = "chunk_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    faiss_id = Column(Integer, unique=True, index=True, nullable=False)
+    path = Column(String(1000), index=True, nullable=False)
+    chunk_id = Column(Integer, nullable=False)  # chunk index within the file
+    content = Column(Text, nullable=False)
+    tokens = Column(Integer, nullable=True)
+
+    # Audit
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return f"<ChunkMetadata(faiss_id={self.faiss_id}, path='{self.path}', chunk={self.chunk_id})>"

@@ -17,6 +17,9 @@ Thumbs.db
 # Database files (generated, not versioned)
 *.db
 
+# Embeddings
+*.bin
+
 # Testing & Coverage
 .pytest_cache/
 .coverage

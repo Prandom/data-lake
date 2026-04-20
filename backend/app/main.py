@@ -1,5 +1,10 @@
 import json
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -15,6 +20,9 @@ from sqlalchemy.orm import Session
 from app.db.models import FileMetadata
 from app.db.session import get_db, init_db
 from app.jobs.sync import get_sync_stats, run_sync
+
+# Week 3 imports
+from app.api.search import router as search_router
 
 
 @asynccontextmanager
@@ -43,6 +51,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount search router
+app.include_router(search_router)
 
 
 # =============================================================================
@@ -357,6 +368,9 @@ async def root() -> Dict[str, Any]:
             "sync_status": "/api/sync/status",
             "sync_trigger": "POST /api/sync/trigger",
             "files": "/api/files",
+            "search": "POST /api/search/",
+            "search_index": "POST /api/search/index",
+            "search_stats": "/api/search/stats",
             "docs": "/docs",
         },
     }
