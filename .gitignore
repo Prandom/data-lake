@@ -30,3 +30,11 @@ htmlcov/
 # Local scratch / temp
 .tmp/
 backend/.tmp/
+
+# Misc docs
+misc/
+
+# test data, and faiss data
+backend/test_data/
+backend/faiss_data/
+backend/test_agent.py

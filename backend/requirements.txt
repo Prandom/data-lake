@@ -24,3 +24,9 @@ apscheduler==3.10.4
 faiss-cpu>=1.7.0
 sentence-transformers>=3.0.0
 numpy>=1.26.0
+
+# Week 4: Claude agent
+anthropic>=0.20.0
+
+# Week 4: Gemini agent (free)
+google-genai>=1.0.0

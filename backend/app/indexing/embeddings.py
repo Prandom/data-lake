@@ -12,7 +12,7 @@ Local model:
 
 import os
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 
 
 class EmbeddingProvider(ABC):
@@ -123,7 +123,7 @@ class OpenAIEmbeddings(EmbeddingProvider):
 
 # ---- Provider factory -------------------------------------------------------
 
-_provider_instance: EmbeddingProvider | None = None
+_provider_instance: Optional[EmbeddingProvider] = None
 
 
 def get_provider() -> EmbeddingProvider:

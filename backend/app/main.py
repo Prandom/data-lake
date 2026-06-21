@@ -7,7 +7,8 @@ load_dotenv()
 
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List
 
 import uvicorn
@@ -24,21 +25,154 @@ from app.jobs.sync import get_sync_stats, run_sync
 # Week 3 imports
 from app.api.search import router as search_router
 
+# Week 4 imports
+from app.api.agent import router as agent_router
+
+
+# =============================================================================
+# SCHEDULER HELPERS (Week 4)
+# =============================================================================
+
+
+def _get_allowed_paths_from_env_safe() -> List[str]:
+    """
+    Parse allowed paths from env. Returns empty list if not configured
+    (used by scheduler — should not raise HTTPException).
+    """
+    raw = os.getenv("DATA_LAKE_ALLOWED_PATHS", "").strip()
+    if not raw:
+        return []
+    return [p.strip() for p in re.split(r"[;,]", raw) if p.strip()]
+
+
+def _run_scheduled_sync():
+    """
+    Scheduled sync job. Runs every 30 minutes.
+    Scans allowed paths and flags changed files.
+    """
+    from app.db.session import SessionLocal
+
+    allowed = _get_allowed_paths_from_env_safe()
+    if not allowed:
+        print("[Scheduler] Skipping sync: DATA_LAKE_ALLOWED_PATHS not set")
+        return
+
+    db = SessionLocal()
+    try:
+        result = run_sync(db, allowed_paths=allowed)
+        print(
+            f"[Scheduler] Sync complete: "
+            f"{result['stats']['files_scanned']} scanned, "
+            f"{result['stats']['files_changed']} changed"
+        )
+    except Exception as e:
+        print(f"[Scheduler] Sync failed: {e}")
+    finally:
+        db.close()
+
+
+def _run_scheduled_index():
+    """
+    Scheduled indexing job. Runs 5 minutes after sync.
+    Embeds any files flagged with needs_sync=True.
+    """
+    from app.db.session import SessionLocal
+    from app.indexing.chunker import chunk_file
+    from app.indexing.embeddings import get_provider
+    from app.indexing.vector_store import VectorStore
+
+    db = SessionLocal()
+    try:
+        pending = (
+            db.query(FileMetadata)
+            .filter(FileMetadata.needs_sync == True)
+            .limit(100)
+            .all()
+        )
+
+        if not pending:
+            return
+
+        provider = get_provider()
+        vector_store = VectorStore(db=db, embedding_provider=provider)
+
+        indexed = 0
+        for file in pending:
+            try:
+                chunks = chunk_file(Path(file.path))
+                if not chunks:
+                    file.needs_sync = False
+                    continue
+                vector_store.delete_by_path(file.path)
+                vector_store.add_chunks(chunks)
+                file.needs_sync = False
+                indexed += 1
+            except Exception as e:
+                print(f"[Scheduler] Index error for {file.path}: {e}")
+
+        db.commit()
+        print(f"[Scheduler] Indexed {indexed} files")
+    except Exception as e:
+        print(f"[Scheduler] Indexing failed: {e}")
+    finally:
+        db.close()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialise database
     if os.getenv("DATA_LAKE_TESTING") != "1":
         init_db()
-    print("Starting Personal Data Lake Agent (Week 2)...")
+
+    # Start APScheduler (Week 4)
+    scheduler = None
+    if os.getenv("DATA_LAKE_TESTING") != "1":
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+
+            scheduler = BackgroundScheduler()
+
+            # Sync every 30 minutes — scans filesystem, flags changed files
+            scheduler.add_job(
+                _run_scheduled_sync,
+                "interval",
+                minutes=30,
+                id="sync_job",
+                name="Filesystem sync",
+            )
+
+            # Index 5 minutes after sync — embeds flagged files into FAISS
+            scheduler.add_job(
+                _run_scheduled_index,
+                "interval",
+                minutes=30,
+                id="index_job",
+                name="FAISS indexing",
+                next_run_time=datetime.now() + timedelta(minutes=5),
+            )
+
+            scheduler.start()
+            print("[Scheduler] Started: sync every 30min, index every 30min (offset 5min)")
+        except ImportError:
+            print("[Scheduler] APScheduler not installed, running without auto-sync")
+        except Exception as e:
+            print(f"[Scheduler] Failed to start: {e}")
+
+    print("Starting Personal Data Lake Agent (Week 4)...")
     print("Docs: http://localhost:8000/docs")
     yield
+
+    # Shutdown scheduler
+    if scheduler:
+        scheduler.shutdown(wait=False)
+        print("[Scheduler] Stopped")
     print("Shutting down...")
 
 
 app = FastAPI(
     title="Personal Data Lake Agent",
-    description="Week 2: FastAPI + FileSystem MCP + DB + Sync job",
-    version="0.1.0",
+    description="Week 4: FastAPI + FAISS Search + Claude Agent + APScheduler",
+    version="0.4.0",
     lifespan=lifespan,
     redoc_url=None,  # Disable ReDoc to avoid CDN MIME type issues
 )
@@ -52,8 +186,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount search router
+# Mount routers
 app.include_router(search_router)
+app.include_router(agent_router)
 
 
 # =============================================================================
@@ -358,10 +493,12 @@ async def root() -> Dict[str, Any]:
     return {
         "message": "Personal Data Lake Agent backend is running",
         "status": "ok",
+        "version": "0.4.0",
         "endpoints": {
             "health": "/health",
             "status": "/api/status",
-            "query": "POST /api/query?query=...",
+            "agent_query": "POST /api/agent/query",
+            "query_legacy": "POST /api/query?query=...",
             "websocket": "ws://localhost:8000/ws/query",
             "fs_list": "/api/test/filesystem/list?path=.",
             "fs_read": "/api/test/filesystem/read?path=./some_file.txt",
