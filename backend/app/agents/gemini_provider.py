@@ -29,7 +29,7 @@ class GeminiProvider(AgentProvider):
     Requires GOOGLE_AI_API_KEY in .env.
     """
 
-    def __init__(self, model: str = "gemini-2.0-flash"):
+    def __init__(self, model: str = "gemini-2.5-flash-lite"):
         from google import genai
 
         api_key = os.getenv("GOOGLE_AI_API_KEY", "").strip()

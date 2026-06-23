@@ -113,6 +113,7 @@ def get_agent_provider() -> AgentProvider:
       - gemini  (default, free)
       - claude  (paid, best quality)
       - ollama  (free, local)
+      - groq    (free, cloud)
     """
     provider = os.getenv("AGENT_PROVIDER", "ollama").lower().strip()
 
@@ -128,8 +129,12 @@ def get_agent_provider() -> AgentProvider:
         from app.agents.ollama_provider import OllamaProvider
         return OllamaProvider()
 
+    elif provider == "groq":
+        from app.agents.groq_provider import GroqProvider
+        return GroqProvider()
+
     else:
         raise ValueError(
             f"Unknown AGENT_PROVIDER: '{provider}'. "
-            f"Valid options: claude, gemini, ollama"
+            f"Valid options: claude, gemini, ollama, groq"
         )

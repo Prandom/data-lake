@@ -51,7 +51,10 @@ class LocalEmbeddings(EmbeddingProvider):
 
         self.model_name = model_name
         self.model = SentenceTransformer(model_name)
-        self._dimension = self.model.get_sentence_embedding_dimension()
+        if hasattr(self.model, "get_embedding_dimension"):
+            self._dimension = self.model.get_embedding_dimension()
+        else:
+            self._dimension = self.model.get_sentence_embedding_dimension()
 
     def embed(self, text: str) -> List[float]:
         """Embed a single text."""

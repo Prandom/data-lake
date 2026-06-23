@@ -14,6 +14,39 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class User(Base):
+    """
+    User account — keyed by Firebase UID.
+
+    The Firebase UID is used directly as the primary key (no auto-increment).
+    This simplifies the mapping between Firebase Auth and our database.
+
+    Fields:
+    - id: Firebase UID (string, primary key)
+    - email: user's email from Firebase
+    - display_name: user's display name
+    - created_at: when the record was first created
+    - updated_at: last time the record was updated
+    """
+
+    __tablename__ = "users"
+
+    id = Column(String(128), primary_key=True)  # Firebase UID
+    email = Column(String(255), nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)
+
+    # Audit
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self):
+        return f"<User(id='{self.id}', email='{self.email}')>"
+
+
 class FileMetadata(Base):
     """
     Tracks individual files that have been discovered.

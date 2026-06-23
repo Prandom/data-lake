@@ -9,7 +9,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket
@@ -442,7 +442,7 @@ async def trigger_sync(db: Session = Depends(get_db)):
 async def list_files(
     limit: int = 50,
     offset: int = 0,
-    needs_sync: bool | None = None,
+    needs_sync: Optional[bool] = None,
     db: Session = Depends(get_db),
 ):
     """

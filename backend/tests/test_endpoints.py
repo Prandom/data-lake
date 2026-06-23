@@ -140,7 +140,7 @@ class TestRootEndpoint:
         data = response.json()
         endpoints = data["endpoints"]
         
-        expected_endpoints = ["health", "status", "query", "docs"]
+        expected_endpoints = ["health", "status", "agent_query", "docs"]
         for endpoint in expected_endpoints:
             assert endpoint in endpoints
 
